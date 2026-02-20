@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import db from './src/db.ts';
+import { getDb } from './src/db.ts';
 import { GoogleGenAI } from '@google/genai';
 import OpenAI from 'openai';
 
@@ -13,9 +13,10 @@ app.use(express.json());
 // API Routes
 
 // Get all forms
-app.get('/api/forms', (req, res) => {
+app.get('/api/forms', async (req, res) => {
   try {
-    const forms = db.prepare('SELECT * FROM forms ORDER BY created_at DESC').all();
+    const db = await getDb();
+    const forms = await db.all('SELECT * FROM forms ORDER BY created_at DESC');
     res.json(forms);
   } catch (error) {
     console.error('Error fetching forms:', error);
@@ -24,21 +25,22 @@ app.get('/api/forms', (req, res) => {
 });
 
 // Get a single form with fields and resources
-app.get('/api/forms/:id', (req, res) => {
+app.get('/api/forms/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const form = db.prepare('SELECT * FROM forms WHERE id = ?').get(id);
+    const db = await getDb();
+    const form = await db.get('SELECT * FROM forms WHERE id = ?', id);
     
     if (!form) {
       return res.status(404).json({ error: 'Form not found' });
     }
 
-    const fields = db.prepare('SELECT * FROM fields WHERE form_id = ? ORDER BY order_index ASC').all(id);
-    const resources = db.prepare(`
+    const fields = await db.all('SELECT * FROM fields WHERE form_id = ? ORDER BY order_index ASC', id);
+    const resources = await db.all(`
       SELECT r.* FROM resources r
       JOIN form_resources fr ON r.id = fr.resource_id
       WHERE fr.form_id = ?
-    `).all(id);
+    `, id);
 
     res.json({ ...form, fields, resources });
   } catch (error) {
@@ -48,7 +50,7 @@ app.get('/api/forms/:id', (req, res) => {
 });
 
 // Create a new form
-app.post('/api/forms', (req, res) => {
+app.post('/api/forms', async (req, res) => {
   try {
     const { title, description, prompt_template, fields, provider, model, resource_ids } = req.body;
     
@@ -56,28 +58,31 @@ app.post('/api/forms', (req, res) => {
       return res.status(400).json({ error: 'Title is required' });
     }
 
-    const insertForm = db.prepare('INSERT INTO forms (title, description, prompt_template, provider, model) VALUES (?, ?, ?, ?, ?)');
-    const info = insertForm.run(
+    const db = await getDb();
+    const result = await db.run(
+      'INSERT INTO forms (title, description, prompt_template, provider, model) VALUES (?, ?, ?, ?, ?)',
       title, 
       description || '', 
       prompt_template || '',
       provider || 'gemini',
       model || 'gemini-2.5-flash-latest'
     );
-    const formId = info.lastInsertRowid;
+    const formId = result.lastID;
 
     if (fields && Array.isArray(fields)) {
-      const insertField = db.prepare('INSERT INTO fields (form_id, name, label, type, placeholder, required, order_index) VALUES (?, ?, ?, ?, ?, ?, ?)');
-      fields.forEach((field: any, index: number) => {
-        insertField.run(formId, field.name, field.label, field.type, field.placeholder || '', field.required ? 1 : 0, index);
-      });
+      for (let index = 0; index < fields.length; index++) {
+        const field = fields[index];
+        await db.run(
+          'INSERT INTO fields (form_id, name, label, type, placeholder, required, order_index) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          formId, field.name, field.label, field.type, field.placeholder || '', field.required ? 1 : 0, index
+        );
+      }
     }
 
     if (resource_ids && Array.isArray(resource_ids)) {
-      const insertResource = db.prepare('INSERT INTO form_resources (form_id, resource_id) VALUES (?, ?)');
-      resource_ids.forEach((resourceId: number) => {
-        insertResource.run(formId, resourceId);
-      });
+      for (const resourceId of resource_ids) {
+        await db.run('INSERT INTO form_resources (form_id, resource_id) VALUES (?, ?)', formId, resourceId);
+      }
     }
 
     res.status(201).json({ id: formId, message: 'Form created successfully' });
@@ -88,7 +93,7 @@ app.post('/api/forms', (req, res) => {
 });
 
 // Update a form
-app.put('/api/forms/:id', (req, res) => {
+app.put('/api/forms/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { title, description, prompt_template, fields, provider, model, resource_ids } = req.body;
@@ -97,8 +102,9 @@ app.put('/api/forms/:id', (req, res) => {
       return res.status(400).json({ error: 'Title is required' });
     }
 
-    const updateForm = db.prepare('UPDATE forms SET title = ?, description = ?, prompt_template = ?, provider = ?, model = ? WHERE id = ?');
-    updateForm.run(
+    const db = await getDb();
+    await db.run(
+      'UPDATE forms SET title = ?, description = ?, prompt_template = ?, provider = ?, model = ? WHERE id = ?',
       title, 
       description || '', 
       prompt_template || '', 
@@ -108,21 +114,23 @@ app.put('/api/forms/:id', (req, res) => {
     );
 
     // Update fields
-    db.prepare('DELETE FROM fields WHERE form_id = ?').run(id);
+    await db.run('DELETE FROM fields WHERE form_id = ?', id);
     if (fields && Array.isArray(fields)) {
-      const insertField = db.prepare('INSERT INTO fields (form_id, name, label, type, placeholder, required, order_index) VALUES (?, ?, ?, ?, ?, ?, ?)');
-      fields.forEach((field: any, index: number) => {
-        insertField.run(id, field.name, field.label, field.type, field.placeholder || '', field.required ? 1 : 0, index);
-      });
+      for (let index = 0; index < fields.length; index++) {
+        const field = fields[index];
+        await db.run(
+          'INSERT INTO fields (form_id, name, label, type, placeholder, required, order_index) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          id, field.name, field.label, field.type, field.placeholder || '', field.required ? 1 : 0, index
+        );
+      }
     }
 
     // Update resources
-    db.prepare('DELETE FROM form_resources WHERE form_id = ?').run(id);
+    await db.run('DELETE FROM form_resources WHERE form_id = ?', id);
     if (resource_ids && Array.isArray(resource_ids)) {
-      const insertResource = db.prepare('INSERT INTO form_resources (form_id, resource_id) VALUES (?, ?)');
-      resource_ids.forEach((resourceId: number) => {
-        insertResource.run(id, resourceId);
-      });
+      for (const resourceId of resource_ids) {
+        await db.run('INSERT INTO form_resources (form_id, resource_id) VALUES (?, ?)', id, resourceId);
+      }
     }
 
     res.json({ message: 'Form updated successfully' });
@@ -133,12 +141,13 @@ app.put('/api/forms/:id', (req, res) => {
 });
 
 // Delete a form
-app.delete('/api/forms/:id', (req, res) => {
+app.delete('/api/forms/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    db.prepare('DELETE FROM fields WHERE form_id = ?').run(id);
-    db.prepare('DELETE FROM form_resources WHERE form_id = ?').run(id);
-    db.prepare('DELETE FROM forms WHERE id = ?').run(id);
+    const db = await getDb();
+    await db.run('DELETE FROM fields WHERE form_id = ?', id);
+    await db.run('DELETE FROM form_resources WHERE form_id = ?', id);
+    await db.run('DELETE FROM forms WHERE id = ?', id);
     res.json({ message: 'Form deleted successfully' });
   } catch (error) {
     console.error('Error deleting form:', error);
@@ -147,9 +156,10 @@ app.delete('/api/forms/:id', (req, res) => {
 });
 
 // Resources API
-app.get('/api/resources', (req, res) => {
+app.get('/api/resources', async (req, res) => {
   try {
-    const resources = db.prepare('SELECT * FROM resources ORDER BY created_at DESC').all();
+    const db = await getDb();
+    const resources = await db.all('SELECT * FROM resources ORDER BY created_at DESC');
     res.json(resources);
   } catch (error) {
     console.error('Error fetching resources:', error);
@@ -157,14 +167,14 @@ app.get('/api/resources', (req, res) => {
   }
 });
 
-app.post('/api/resources', (req, res) => {
+app.post('/api/resources', async (req, res) => {
   try {
     const { name, type, content } = req.body;
     if (!name || !content) {
       return res.status(400).json({ error: 'Name and content are required' });
     }
-    const insert = db.prepare('INSERT INTO resources (name, type, content) VALUES (?, ?, ?)');
-    insert.run(name, type || 'text', content);
+    const db = await getDb();
+    await db.run('INSERT INTO resources (name, type, content) VALUES (?, ?, ?)', name, type || 'text', content);
     res.status(201).json({ message: 'Resource created' });
   } catch (error) {
     console.error('Error creating resource:', error);
@@ -172,10 +182,11 @@ app.post('/api/resources', (req, res) => {
   }
 });
 
-app.delete('/api/resources/:id', (req, res) => {
+app.delete('/api/resources/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    db.prepare('DELETE FROM resources WHERE id = ?').run(id);
+    const db = await getDb();
+    await db.run('DELETE FROM resources WHERE id = ?', id);
     res.json({ message: 'Resource deleted' });
   } catch (error) {
     console.error('Error deleting resource:', error);
@@ -189,17 +200,18 @@ app.post('/api/forms/:id/execute', async (req, res) => {
     const { id } = req.params;
     const { inputs, config } = req.body; // config contains { apiKey } (provider/model come from DB now)
 
-    const form = db.prepare('SELECT * FROM forms WHERE id = ?').get(id) as any;
+    const db = await getDb();
+    const form = await db.get('SELECT * FROM forms WHERE id = ?', id) as any;
     if (!form) {
       return res.status(404).json({ error: 'Form not found' });
     }
 
     // Fetch attached resources
-    const resources = db.prepare(`
+    const resources = await db.all(`
       SELECT r.content, r.name FROM resources r
       JOIN form_resources fr ON r.id = fr.resource_id
       WHERE fr.form_id = ?
-    `).all(id) as any[];
+    `, id) as any[];
 
     let prompt = form.prompt_template;
     
@@ -258,7 +270,6 @@ app.post('/api/forms/:id/execute', async (req, res) => {
     res.status(500).json({ error: error.message || 'Failed to execute form' });
   }
 });
-
 
 // Vite middleware setup
 if (process.env.NODE_ENV !== 'production') {

@@ -1,62 +1,70 @@
-import Database from 'better-sqlite3';
+import sqlite3 from 'sqlite3';
+import { open, Database } from 'sqlite';
 import path from 'path';
 
-// Initialize database
-const dbPath = path.resolve('forms.db');
-const db = new Database(dbPath);
+let dbInstance: Database | null = null;
 
-// Create tables if they don't exist
-db.exec(`
-  CREATE TABLE IF NOT EXISTS forms (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    description TEXT,
-    prompt_template TEXT NOT NULL,
-    provider TEXT DEFAULT 'gemini',
-    model TEXT DEFAULT 'gemini-2.5-flash-latest',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+export async function getDb() {
+  if (dbInstance) return dbInstance;
 
-  CREATE TABLE IF NOT EXISTS fields (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    form_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    label TEXT NOT NULL,
-    type TEXT NOT NULL,
-    placeholder TEXT,
-    required INTEGER DEFAULT 0,
-    order_index INTEGER DEFAULT 0,
-    FOREIGN KEY (form_id) REFERENCES forms (id) ON DELETE CASCADE
-  );
+  const dbPath = path.resolve('forms.db');
+  dbInstance = await open({
+    filename: dbPath,
+    driver: sqlite3.Database
+  });
 
-  CREATE TABLE IF NOT EXISTS resources (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    type TEXT NOT NULL, -- 'text', 'url'
-    content TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+  await dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS forms (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      description TEXT,
+      prompt_template TEXT NOT NULL,
+      provider TEXT DEFAULT 'gemini',
+      model TEXT DEFAULT 'gemini-2.5-flash-latest',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
 
-  CREATE TABLE IF NOT EXISTS form_resources (
-    form_id INTEGER NOT NULL,
-    resource_id INTEGER NOT NULL,
-    PRIMARY KEY (form_id, resource_id),
-    FOREIGN KEY (form_id) REFERENCES forms (id) ON DELETE CASCADE,
-    FOREIGN KEY (resource_id) REFERENCES resources (id) ON DELETE CASCADE
-  );
-`);
+    CREATE TABLE IF NOT EXISTS fields (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      form_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      label TEXT NOT NULL,
+      type TEXT NOT NULL,
+      placeholder TEXT,
+      required INTEGER DEFAULT 0,
+      order_index INTEGER DEFAULT 0,
+      FOREIGN KEY (form_id) REFERENCES forms (id) ON DELETE CASCADE
+    );
 
-// Migration helper to add columns if they don't exist (for existing DBs)
-try {
-  db.prepare('ALTER TABLE forms ADD COLUMN provider TEXT DEFAULT "gemini"').run();
-} catch (e) {
-  // Column likely exists
+    CREATE TABLE IF NOT EXISTS resources (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL, -- 'text', 'url'
+      content TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS form_resources (
+      form_id INTEGER NOT NULL,
+      resource_id INTEGER NOT NULL,
+      PRIMARY KEY (form_id, resource_id),
+      FOREIGN KEY (form_id) REFERENCES forms (id) ON DELETE CASCADE,
+      FOREIGN KEY (resource_id) REFERENCES resources (id) ON DELETE CASCADE
+    );
+  `);
+
+  // Migration helper to add columns if they don't exist (for existing DBs)
+  try {
+    await dbInstance.run('ALTER TABLE forms ADD COLUMN provider TEXT DEFAULT "gemini"');
+  } catch (e) {
+    // Column likely exists
+  }
+
+  try {
+    await dbInstance.run('ALTER TABLE forms ADD COLUMN model TEXT DEFAULT "gemini-2.5-flash-latest"');
+  } catch (e) {
+    // Column likely exists
+  }
+
+  return dbInstance;
 }
-
-try {
-  db.prepare('ALTER TABLE forms ADD COLUMN model TEXT DEFAULT "gemini-2.5-flash-latest"').run();
-} catch (e) {
-  // Column likely exists
-}
-
-export default db;
