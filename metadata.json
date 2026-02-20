@@ -1,0 +1,5 @@
+{
+  "name": "AI Form Builder",
+  "description": "A backend-powered application to create, customize, and execute AI-powered forms with custom prompts.",
+  "requestFramePermissions": []
+}
