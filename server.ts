@@ -277,6 +277,29 @@ if (process.env.NODE_ENV !== 'production') {
     server: { middlewareMode: true },
     appType: 'custom',
   });
+
+  app.use((req, res, next) => {
+    const url = req.originalUrl.split('?')[0];
+    if (url.endsWith('.tsx') || url.endsWith('.ts')) {
+      res.setHeader('Content-Type', 'application/javascript');
+    }
+
+    const originalSetHeader = res.setHeader;
+    res.setHeader = function(name: string, value: string | number | readonly string[]) {
+      if (name.toLowerCase() === 'content-type') {
+        if (url.endsWith('.tsx') || url.endsWith('.ts')) {
+          // If the value is text/plain, force it to application/javascript
+          if (String(value).includes('text/plain')) {
+            value = 'application/javascript';
+          }
+        }
+      }
+      return originalSetHeader.call(this, name, value);
+    };
+
+    next();
+  });
+
   app.use(vite.middlewares);
   
   // Handle SPA routing in dev mode - this is crucial!
