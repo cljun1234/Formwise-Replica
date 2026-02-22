@@ -275,7 +275,7 @@ app.post('/api/forms/:id/execute', async (req, res) => {
 if (process.env.NODE_ENV !== 'production') {
   const vite = await createViteServer({
     server: { middlewareMode: true },
-    appType: 'spa',
+    appType: 'custom',
   });
   app.use(vite.middlewares);
   
@@ -284,23 +284,15 @@ if (process.env.NODE_ENV !== 'production') {
     const url = req.originalUrl;
     try {
       // 1. Read index.html
+      const fs = await import('fs');
+      const path = await import('path');
+      const template = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8');
+      
       // 2. Apply Vite HTML transforms. This injects the HMR client.
+      const html = await vite.transformIndexHtml(url, template);
+      
       // 3. Send back the transformed HTML
-      let template = await vite.transformIndexHtml(url, `
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
-      `);
-      res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
     } catch (e) {
       vite.ssrFixStacktrace(e as Error);
       next(e);
