@@ -288,10 +288,7 @@ if (process.env.NODE_ENV !== 'production') {
     res.setHeader = function(name: string, value: string | number | readonly string[]) {
       if (name.toLowerCase() === 'content-type') {
         if (url.endsWith('.tsx') || url.endsWith('.ts') || url.endsWith('.jsx')) {
-          // If the value is text/plain, force it to application/javascript
-          if (String(value).includes('text/plain')) {
-            value = 'application/javascript';
-          }
+          value = 'application/javascript';
         }
       }
       return originalSetHeader.call(this, name, value);
@@ -309,18 +306,13 @@ if (process.env.NODE_ENV !== 'production') {
          if (headers && typeof headers === 'object') {
              for (const key in headers) {
                  if (key.toLowerCase() === 'content-type') {
-                    if (String(headers[key]).includes('text/plain')) {
-                        headers[key] = 'application/javascript';
-                    }
+                    headers[key] = 'application/javascript';
                  }
              }
          }
          // Also check if setHeader was already called (which is stored in internal headers)
          // Node's getHeader might return it.
-         const existingType = res.getHeader('Content-Type');
-         if (existingType && String(existingType).includes('text/plain')) {
-             res.setHeader('Content-Type', 'application/javascript');
-         }
+         res.setHeader('Content-Type', 'application/javascript');
       }
       return originalWriteHead.call(this, statusCode, statusMessage, headers);
     };
