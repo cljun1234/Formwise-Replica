@@ -280,14 +280,14 @@ if (process.env.NODE_ENV !== 'production') {
 
   app.use((req, res, next) => {
     const url = req.originalUrl.split('?')[0];
-    if (url.endsWith('.tsx') || url.endsWith('.ts')) {
+    if (url.endsWith('.tsx') || url.endsWith('.ts') || url.endsWith('.jsx')) {
       res.setHeader('Content-Type', 'application/javascript');
     }
 
     const originalSetHeader = res.setHeader;
     res.setHeader = function(name: string, value: string | number | readonly string[]) {
       if (name.toLowerCase() === 'content-type') {
-        if (url.endsWith('.tsx') || url.endsWith('.ts')) {
+        if (url.endsWith('.tsx') || url.endsWith('.ts') || url.endsWith('.jsx')) {
           // If the value is text/plain, force it to application/javascript
           if (String(value).includes('text/plain')) {
             value = 'application/javascript';
@@ -295,6 +295,34 @@ if (process.env.NODE_ENV !== 'production') {
         }
       }
       return originalSetHeader.call(this, name, value);
+    };
+
+    const originalWriteHead = res.writeHead;
+    res.writeHead = function(statusCode: number, statusMessage?: string | any, headers?: any) {
+      if (typeof statusMessage === 'object' && !headers) {
+        headers = statusMessage;
+        statusMessage = undefined;
+      }
+
+      if (url.endsWith('.tsx') || url.endsWith('.ts') || url.endsWith('.jsx')) {
+         // Check if headers object contains Content-Type and patch it
+         if (headers && typeof headers === 'object') {
+             for (const key in headers) {
+                 if (key.toLowerCase() === 'content-type') {
+                    if (String(headers[key]).includes('text/plain')) {
+                        headers[key] = 'application/javascript';
+                    }
+                 }
+             }
+         }
+         // Also check if setHeader was already called (which is stored in internal headers)
+         // Node's getHeader might return it.
+         const existingType = res.getHeader('Content-Type');
+         if (existingType && String(existingType).includes('text/plain')) {
+             res.setHeader('Content-Type', 'application/javascript');
+         }
+      }
+      return originalWriteHead.call(this, statusCode, statusMessage, headers);
     };
 
     next();
