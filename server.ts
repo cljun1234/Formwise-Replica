@@ -6,7 +6,7 @@ import { GoogleGenAI } from '@google/genai';
 import OpenAI from 'openai';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
 
@@ -278,6 +278,34 @@ if (process.env.NODE_ENV !== 'production') {
     appType: 'spa',
   });
   app.use(vite.middlewares);
+  
+  // Handle SPA routing in dev mode - this is crucial!
+  app.use('*', async (req, res, next) => {
+    const url = req.originalUrl;
+    try {
+      // 1. Read index.html
+      // 2. Apply Vite HTML transforms. This injects the HMR client.
+      // 3. Send back the transformed HTML
+      let template = await vite.transformIndexHtml(url, `
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Google AI Studio App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+      `);
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+    } catch (e) {
+      vite.ssrFixStacktrace(e as Error);
+      next(e);
+    }
+  });
 } else {
   // Serve static files in production (if built)
   app.use(express.static('dist'));
